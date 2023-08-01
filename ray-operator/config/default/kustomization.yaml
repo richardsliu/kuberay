@@ -14,6 +14,7 @@ namespace: ray-system
 
 bases:
 - ../crd
+- ../configmap
 - ../rbac
 - ../manager
 - namespace.yaml
@@ -21,7 +22,10 @@ bases:
 #- ../prometheus
 
 images:
-- name: kuberay/operator
-  newName: kuberay/operator
-  newTag: nightly
+- name: gcr.io/ricliu-gke-dev/kuberay-operator
+  newName: gcr.io/ricliu-gke-dev/kuberay-operator
+  newTag: "0731"
+    #- name: kuberay/operator
+    #newName: kuberay/operator
+    #newTag: nightly
 

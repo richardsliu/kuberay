@@ -203,42 +203,38 @@ func DefaultWorkerPodTemplate(instance rayv1alpha1.RayCluster, workerSpec rayv1a
 	if enableInitContainerInjection {
 		// Do not modify `deepCopyRayContainer` anywhere.
 		deepCopyRayContainer := podTemplate.Spec.Containers[rayContainerIndex].DeepCopy()
+		executeMode := int32(0744)
+		waitGcsVolume := v1.Volume{
+			Name: "wait-gcs-ready-volume",
+			VolumeSource: v1.VolumeSource{
+				ConfigMap: &v1.ConfigMapVolumeSource{
+					LocalObjectReference: v1.LocalObjectReference{
+						Name: "wait-gcs-ready",
+					},
+					DefaultMode: &executeMode,
+				},
+			},
+		}
+		waitGcsVolumeMount := v1.VolumeMount{
+			Name:      "wait-gcs-ready-volume",
+			MountPath: "bin/wait-gcs-ready.sh",
+		}
 		initContainer := v1.Container{
 			Name:            "wait-gcs-ready",
 			Image:           podTemplate.Spec.Containers[rayContainerIndex].Image,
 			ImagePullPolicy: podTemplate.Spec.Containers[rayContainerIndex].ImagePullPolicy,
-			Command:         []string{"/bin/bash", "-lc", "--"},
-			Args: []string{
-				fmt.Sprintf(`
-					SECONDS=0
-					while true; do
-						if (( SECONDS <= 120 )); then
-							if ray health-check --address %s:%s > /dev/null 2>&1; then
-								echo "GCS is ready."
-								break
-							fi
-							echo "$SECONDS seconds elapsed: Waiting for GCS to be ready."
-						else
-							if ray health-check --address %s:%s; then
-								echo "GCS is ready. Any error messages above can be safely ignored."
-								break
-							fi
-							echo "$SECONDS seconds elapsed: Still waiting for GCS to be ready. For troubleshooting, refer to the FAQ at https://github.com/ray-project/kuberay/blob/master/docs/guidance/FAQ.md."
-						fi
-						sleep 5		
-					done
-				`, fqdnRayIP, headPort, fqdnRayIP, headPort),
-			},
+			Command:         []string{"/bin/wait-gcs-ready.sh", fqdnRayIP, headPort, fqdnRayIP, headPort},
 			SecurityContext: podTemplate.Spec.Containers[rayContainerIndex].SecurityContext.DeepCopy(),
 			// This init container requires certain environment variables to establish a secure connection with the Ray head using TLS authentication.
 			// Additionally, some of these environment variables may reference files stored in volumes, so we need to include both the `Env` and `VolumeMounts` fields here.
 			// For more details, please refer to: https://docs.ray.io/en/latest/ray-core/configure.html#tls-authentication.
 			Env:          deepCopyRayContainer.Env,
-			VolumeMounts: deepCopyRayContainer.VolumeMounts,
+			VolumeMounts: append(deepCopyRayContainer.VolumeMounts, waitGcsVolumeMount),
 			// If users specify ResourceQuota for the namespace, the init container need to specify resource explicitly.
 			Resources: deepCopyRayContainer.Resources,
 		}
 		podTemplate.Spec.InitContainers = append(podTemplate.Spec.InitContainers, initContainer)
+		podTemplate.Spec.Volumes = append(podTemplate.Spec.Volumes, waitGcsVolume)
 	}
 	// If the replica of workers is more than 1, `ObjectMeta.Name` may cause name conflict errors.
 	// Hence, we set `ObjectMeta.Name` to an empty string, and use GenerateName to prevent name conflicts.
